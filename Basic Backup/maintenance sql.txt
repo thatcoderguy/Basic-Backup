@@ -1,0 +1,103 @@
+USE master;
+GO
+CREATE PROCEDURE sp_admin_dbmaintenance 
+	@strDatabaseName varchar(128),
+	@bitShrink bit=0,
+	@bitReindex bit=0,
+	@bitRebuild bit=0,
+	@intThreshold int=0,
+	@intFillFactor int=0
+AS
+BEGIN
+
+SET NOCOUNT ON
+
+--shrink database (set recovery mode to simple to get rid of transaction log
+IF @bitShrink=1 BEGIN
+
+	DECLARE @sql nvarchar(4000)
+	SET @sql = N'ALTER DATABASE ' + @strDatabaseName + N' SET RECOVERY SIMPLE'
+	EXEC sp_executesql @sql
+
+	DBCC SHRINKDATABASE (@strDatabaseName, 10);
+	
+END
+
+--rebuild indexes
+IF @bitReindex=1 BEGIN
+
+	DECLARE @DatabaseTables TABLE (
+		id int,
+		tablename varchar(128),
+		indexname varchar(128),
+		avgfragmentation float
+	)
+
+	INSERT INTO @DatabaseTables
+	SELECT a.object_id,o.name as tablename,b.name as indexname,a.avg_fragmentation_in_percent
+	FROM sys.objects AS o
+	JOIN sys.indexes as b ON b.object_id= o.object_id
+	JOIN sys.dm_db_index_physical_stats (DB_ID(N'Mobile2business'), NULL, NULL, NULL, NULL) AS a ON a.object_id = b.object_id AND a.index_id = b.index_id
+	WHERE o.type_desc='USER_TABLE'
+
+	DECLARE @index int
+	DECLARE @tablename varchar(128)
+	DECLARE @indexname varchar(128)
+
+	--DEFRAG indexes that have >4% and <30% fragmentation
+	SELECT @index=MIN(id) FROM @DatabaseTables WHERE avgfragmentation<30 and avgfragmentation>4
+	WHILE @index IS NOT NULL BEGIN
+		
+		SELECT @tablename=tablename,@indexname=indexname FROM @DatabaseTables WHERE id=@index
+		
+		SET @sql=N'ALTER INDEX ' + @indexname + N' ON ' + @tablename + N' REORGANIZE'
+		EXEC sp_executesql @sql
+
+		SELECT @index=MIN(id) FROM @DatabaseTables WHERE avgfragmentation>30 AND id>@index
+	END
+
+	--REBUILD indexes that have >30% fragmentation
+	SELECT @index=MIN(id) FROM @DatabaseTables WHERE avgfragmentation>30
+	WHILE @index IS NOT NULL BEGIN
+		
+		SELECT @tablename=tablename,@indexname=indexname FROM @DatabaseTables WHERE id=@index
+		
+		SET @sql=N'ALTER INDEX ' + @indexname + N' ON ' + @tablename + N' REBUILD WITH (PAD_INDEX=OFF,FILLFACTOR=' + CAST(@intFillFactor as nvarchar(10)) + N',SORT_IN_TEMPDB=ON,STATISTICS_NORECOMPUTE=OFF,ALLOW_ROW_LOCKS=ON,ALLOW_PAGE_LOCKS=ON,MAXDOP=0)'
+		EXEC sp_executesql @sql
+
+		SELECT @index=MIN(id) FROM @DatabaseTables WHERE avgfragmentation>30 AND id>@index
+	END
+
+END
+
+IF @intThreshold>0 BEGIN
+
+	DECLARE @dbSize decimal(8,2)
+
+	SELECT @dbSize=CAST(SUM(size) * 8. / 1024 AS DECIMAL(8,2))
+	FROM sys.master_files WITH(NOWAIT)
+	WHERE database_id = DB_ID('Mobile2Business') -- for current db 
+	GROUP BY database_id
+	
+	SET NOCOUNT OFF
+	
+	IF @dbSize>@intThreshold BEGIN
+	
+		SELECT @strDatabaseName as DatabaseName, 'ALERT DATABASE OVER THRESHOLD ' +  CAST(@intThreshold as nvarchar(10)) + ' @ ' + CAST(@dbSize as nvarchar(10)) as AlterStatus
+		
+	END ELSE BEGIN
+	
+		SELECT @strDatabaseName as DatabaseName, 'OK' as AlertStatus
+	
+	END
+		
+END ELSE BEGIN
+
+	SET NOCOUNT OFF
+
+	SELECT @strDatabaseName as DatabaseName, 'OK' as AlertStatus
+
+END
+
+END
+GO
