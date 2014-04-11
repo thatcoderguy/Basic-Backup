@@ -21,3 +21,10 @@ The application accepts 1 or 2 arguments:
   
 Ideally this application can be setup with one or more Scheduled Tasks so that the backup tasks can 
 be executed at specified times.
+
+
+TO DO
+============
+
+Add support to "backup to email address"
+Add inline queries support.
