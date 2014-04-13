@@ -26,5 +26,6 @@ be executed at specified times.
 TO DO
 ============
 
-Add support to "backup to email address"
-Add inline queries support.
+1. Add support to "backup to email address"
+2. Add inline queries support.
+3. Add table and databases size monitoring
