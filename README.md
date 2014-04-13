@@ -1,7 +1,7 @@
 Basic-Backup
 ============
 
-A basic server backup app; backs up databases, files, and IIS metabases
+A basic server backup app that backs up; databases, files, and IIS metabases. Useful for web applications, where a clone of the server isn't requried.
 
 Installation and usage
 ============
